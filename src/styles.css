@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600&family=Inter:wght@400;600&display=swap');
+
+:root {
+  --accent: #9fe8ff;
+  --accent2: #ffd27f;
+  --panel: rgba(8, 10, 18, 0.55);
+  --line: rgba(160, 220, 255, 0.18);
+}
+
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #e8e6f0; font-family: Inter, 'Segoe UI', system-ui, sans-serif; }
+#app, #app canvas { display: block; width: 100%; height: 100%; }
+.hidden { display: none !important; }
+
+/* ---------- Start screen ---------- */
+#start {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 120%, #2a1440 0%, #0b0716 45%, #030208 100%);
+}
+#start canvas.stars { position: absolute; inset: 0; width: 100%; height: 100%; }
+#start .card { position: relative; width: min(560px, calc(100vw - 32px)); padding: 40px 36px 32px; text-align: center; }
+#start h1 {
+  font-family: 'Chakra Petch', sans-serif; font-weight: 600; letter-spacing: 0.42em; font-size: clamp(34px, 7vw, 60px); margin: 0 0 6px;
+  background: linear-gradient(90deg, #9fe8ff, #d8a7ff 50%, #ffd27f); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+#start .tag { color: #a9a3c3; margin-bottom: 30px; font-size: 14px; letter-spacing: 0.05em; }
+#start .row { display: flex; gap: 8px; margin-bottom: 12px; }
+#start input, #start select {
+  flex: 1; background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); color: #fff; padding: 12px 14px; border-radius: 10px;
+  font-size: 16px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.08em; outline: none;
+}
+#start select option { background: #140f22; }
+#start input:focus { border-color: var(--accent); }
+#start button {
+  background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); color: #fff; padding: 12px 16px; border-radius: 10px; cursor: pointer;
+  font-family: 'Chakra Petch', sans-serif; font-size: 15px; letter-spacing: 0.1em;
+}
+#start button:hover { border-color: var(--accent); }
+#start button.go { width: 100%; margin-top: 8px; padding: 15px; font-size: 18px; background: linear-gradient(90deg, rgba(159, 232, 255, 0.25), rgba(216, 167, 255, 0.25)); }
+#start .preview { margin: 18px 0 6px; min-height: 44px; color: #cfc8e8; font-size: 13px; line-height: 1.6; }
+#start .preview b { color: var(--accent2); font-weight: 600; }
+#start .progress { height: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; overflow: hidden; margin-top: 18px; display: none; }
+#start .progress > div { height: 100%; width: 0; background: linear-gradient(90deg, #9fe8ff, #d8a7ff); transition: width 0.2s; }
+#start.loading .progress { display: block; }
+#start .status { margin-top: 10px; font-size: 13px; color: #a9a3c3; min-height: 18px; }
+#start .foot { margin-top: 26px; font-size: 12px; color: #6f6a88; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; font-family: 'Chakra Petch', sans-serif; }
+#status {
+  position: absolute; top: 16px; left: 16px; padding: 12px 16px; min-width: 230px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; backdrop-filter: blur(6px); font-size: 13px;
+}
+#status .place { font-size: 17px; font-weight: 600; color: #fff; letter-spacing: 0.04em; }
+#status .sub { font-size: 12px; color: #a9b4c8; margin-bottom: 6px; }
+#status .row { color: #dfe7f2; font-variant-numeric: tabular-nums; }
+#status .row span { display: inline-block; width: 52px; color: #7d8aa3; font-size: 11px; letter-spacing: 0.1em; }
+#status em { color: var(--accent); font-style: normal; margin-left: 6px; }
+#status .fly { color: var(--accent2); margin-left: 6px; }
+
+#compass { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: min(560px, 60vw); height: 34px; overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent); }
+#compass .strip { position: absolute; left: 50%; top: 0; height: 100%; }
+#compass .dir { position: absolute; top: 6px; transform: translateX(-50%); font-weight: 600; font-size: 15px; color: #fff; text-shadow: 0 0 6px #000; }
+#compass .dir.minor { font-size: 11px; top: 8px; color: #9aa6bd; }
+#compass .mark { position: absolute; top: 2px; transform: translateX(-50%); font-size: 11px; text-shadow: 0 0 6px #000; white-space: nowrap; text-align: center; }
+#compass .mark i { display: block; font-style: normal; font-size: 10px; color: #dde; opacity: 0.85; }
+#compass .needle { position: absolute; left: 50%; bottom: 0; width: 2px; height: 8px; background: var(--accent); transform: translateX(-50%); }
+
+#crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); }
+#crosshair::before, #crosshair::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 3px #000; }
+#crosshair::before { left: 10px; top: 3px; width: 2px; height: 16px; }
+#crosshair::after { top: 10px; left: 3px; height: 2px; width: 16px; }
+
+#toolbar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 32px); }
+#toolbar .tool { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; color: #a9b4c8; font-size: 13px; }
+#toolbar .tool .key { font-size: 10px; color: #6f7a92; }
+#toolbar .tool .icon { font-size: 16px; }
+#toolbar .tool.active { color: #fff; border-color: var(--accent); box-shadow: 0 0 14px rgba(159, 232, 255, 0.25); }
+#toolbar .hint { width: 100%; text-align: center; font-size: 11px; color: #9aa6bd; text-shadow: 0 0 4px #000; font-family: Inter, sans-serif; }
+#fuel { position: absolute; bottom: 104px; left: 50%; transform: translateX(-50%); width: 120px; height: 3px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; transition: opacity 0.6s; }
+#fuel > div { height: 100%; background: var(--accent2); border-radius: 2px; }
+#fuel.full { opacity: 0; }
+
+#toasts { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.toast { text-align: center; animation: toastIn 0.6s ease; transition: opacity 1s, transform 1s; text-shadow: 0 0 12px rgba(0, 0, 0, 0.9); }
+.toast .t { font-size: 24px; font-weight: 600; letter-spacing: 0.12em; }
+.toast .s { font-size: 13px; color: #cfd6e6; font-family: Inter, sans-serif; }
+.toast.out { opacity: 0; transform: translateY(-8px); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); letter-spacing: 0.4em; } }
+
+#scanline { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%); padding: 7px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.4s; white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
+#scanline.show { opacity: 1; }
+#stats { position: absolute; right: 12px; bottom: 12px; font-family: ui-monospace, monospace; font-size: 11px; color: #9aa6bd; white-space: pre; display: none; background: rgba(0, 0, 0, 0.4); padding: 6px 8px; border-radius: 6px; }
+#stats.show { display: block; }
+
+#help { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 22px 26px; background: rgba(8, 10, 18, 0.82); border: 1px solid var(--line); border-radius: 14px; font-family: Inter, sans-serif; font-size: 14px; box-sizing: border-box; }
+#help h2 { margin: 0 0 12px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.2em; font-size: 16px; color: var(--accent); }
+#help .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+#help p { margin: 5px 0; color: #cfd6e6; }
+#help b { color: #fff; font-family: 'Chakra Petch', sans-serif; }
+#help .tip { margin-top: 14px; color: #a9b4c8; font-size: 13px; line-height: 1.6; }
+@media (max-width: 560px) { #help .cols { grid-template-columns: 1fr; } #status { min-width: 0; } }
+
+#resume { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.35); font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.25em; font-size: 18px; cursor: pointer; }
+
+/* ---------- Map ---------- */
+#map { position: fixed; inset: 0; z-index: 30; display: none; background: #000; }
+#map.open { display: block; }
+#map canvas { width: 100%; height: 100%; cursor: grab; }
+#map .map-legend { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #cfd6e6; background: var(--panel); padding: 8px 14px; border-radius: 10px; border: 1px solid var(--line); white-space: nowrap; }
