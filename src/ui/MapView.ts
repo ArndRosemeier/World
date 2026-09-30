@@ -12,7 +12,7 @@ export class MapView {
   private ctx: CanvasRenderingContext2D;
   private tiles = new Map<string, HTMLCanvasElement | 'pending'>();
   private nextId = 1;
-  scale = 8; // metres per pixel
+  scale = 4; // metres per pixel
   private center = new THREE.Vector2();
   private follow = true;
   open = false;

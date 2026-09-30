@@ -23,10 +23,10 @@ import { clamp, lerp, rgbCss, smoothstep } from './core/math';
 
 export type Quality = 'low' | 'medium' | 'high';
 
-const QUALITY: Record<Quality, { split: number; view: number; shadow: number; bloom: boolean; ratio: number; far: number }> = {
-  low: { split: 1.12, view: 3000, shadow: 1024, bloom: false, ratio: 1, far: 6000 },
-  medium: { split: 1.3, view: 4200, shadow: 2048, bloom: true, ratio: 1.25, far: 9000 },
-  high: { split: 1.5, view: 5600, shadow: 2048, bloom: true, ratio: 1.5, far: 12000 },
+const QUALITY: Record<Quality, { split: number; view: number; shadow: number; bloom: boolean; ratio: number; far: number; msaa: number }> = {
+  low: { split: 1.1, view: 3000, shadow: 1024, bloom: false, ratio: 1, far: 6000, msaa: 0 },
+  medium: { split: 1.3, view: 4200, shadow: 2048, bloom: true, ratio: 1.25, far: 9000, msaa: 2 },
+  high: { split: 1.5, view: 5600, shadow: 2048, bloom: true, ratio: 1.5, far: 12000, msaa: 4 },
 };
 
 interface SaveData {
@@ -98,7 +98,7 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.15, Q.far);
     this.scene.fog = new THREE.FogExp2(0x888888, 0.0003);
 
-    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+    const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: Q.msaa });
     this.composer = new EffectComposer(this.renderer, rt);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.55, 0.55, 0.92);

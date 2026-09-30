@@ -456,8 +456,8 @@ export function createWorldParams(seedText: string): WorldParams {
       stilts: r.chance(0.35),
       ringWall: r.chance(0.5),
       monument: r.pick(['obelisk', 'orb', 'arch', 'totem'] as const),
-      cellSize: layer === 'under' ? 820 : 1000,
-      chance: layer === 'under' ? 0.6 : 0.55,
+      cellSize: layer === 'under' ? 900 : 1100,
+      chance: layer === 'under' ? 0.45 : 0.42,
       lang,
     };
   };

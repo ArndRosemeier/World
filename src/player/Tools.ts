@@ -43,8 +43,24 @@ export class Tools {
     private sparks: Particles,
     private audio: Audio,
   ) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff, wireframe: true, transparent: true, opacity: 0.35, depthWrite: false, fog: false });
-    this.marker = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), mat);
+    // A soft fresnel shell: bright at the silhouette, nearly invisible face-on.
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(0x9fe8ff) }, uTime: { value: 0 } },
+      vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vP;
+        void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = -mv.xyz; vP = position; gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform vec3 uColor; uniform float uTime; varying vec3 vN; varying vec3 vV; varying vec3 vP;
+        void main() {
+          float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+          float rim = pow(f, 3.0);
+          float bands = 0.5 + 0.5 * sin(vP.y * 18.0 - uTime * 4.0);
+          gl_FragColor = vec4(uColor * (rim * 0.9 + bands * rim * 0.4), rim * 0.7);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.marker = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), mat);
     this.marker.renderOrder = 20;
     this.marker.visible = false;
   }
@@ -65,17 +81,18 @@ export class Tools {
     this.hit = this.world.raycast(camera.position, _dir, range);
 
     const m = this.marker;
+    (m.material as THREE.ShaderMaterial).uniforms.uTime.value += dt;
     if (this.hit && (this.tool === 'dig' || this.tool === 'build')) {
       m.visible = true;
       m.position.copy(this.hit.point);
       if (this.tool === 'build') m.position.addScaledVector(this.hit.normal, this.radius * 0.6);
       m.scale.setScalar(this.radius);
-      (m.material as THREE.MeshBasicMaterial).color.set(this.tool === 'dig' ? 0x9fe8ff : 0xffd27f);
+      (m.material as THREE.ShaderMaterial).uniforms.uColor.value.set(this.tool === 'dig' ? 0x9fe8ff : 0xffd27f);
     } else if (this.hit && this.tool === 'blast') {
       m.visible = true;
       m.position.copy(this.hit.point);
       m.scale.setScalar(7.5);
-      (m.material as THREE.MeshBasicMaterial).color.set(0xff6a4a);
+      (m.material as THREE.ShaderMaterial).uniforms.uColor.value.set(0xff6a4a);
     } else m.visible = false;
 
     const primary = input.held(0);

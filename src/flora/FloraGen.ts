@@ -12,9 +12,10 @@ import { RGB, mixRGB, scaleRGB, hsl } from '../core/math';
 
 type V3 = THREE.Vector3;
 
-export function buildFloraVariant(def: FloraDef, variant: number): THREE.BufferGeometry {
+export function buildFloraVariant(def: FloraDef, variant: number, lod = 0): THREE.BufferGeometry {
   const rng = new RNG(def.seed + variant * 7919);
   const b = new GeoBuilder();
+  b.lod = lod;
   const gen = GENERATORS[def.kind];
   gen(b, def, rng);
   return b.build(def.wind);
@@ -87,25 +88,29 @@ function genTree(b: GeoBuilder, d: FloraDef, r: RNG): void {
     b.tube(bentPath(v3(0, trunkR * 1.5, 0), dir, trunkR * r.range(3, 5), 4, v3(0, -0.5, 0), 0.05, r), (t) => trunkR * 0.7 * (1 - t * 0.85), 5, () => barkDark);
   }
 
+  // Breadth-first growth with a branch budget: every level gets its share, so trees stay
+  // balanced while never exceeding ~5-9k triangles.
+  let budget = 44;
+  const queue: { start: V3; dir: V3; len: number; rad: number; depth: number }[] = [];
   const branch = (start: V3, dir: V3, len: number, rad: number, depth: number) => {
     const segs = Math.max(3, Math.round(len / (H * 0.12)));
     const bend = v3(0, -P.droop * 0.4 * (P.depth - depth + 1) / P.depth, 0).addScaledVector(dir.clone().cross(v3(0, 1, 0)), P.twist * 0.4);
     const path = bentPath(start, dir, len, segs, bend, 0.08, r);
-    b.tube(path, (t) => rad * (1 - t * 0.72), depth === P.depth ? 7 : 5, (t) => mixRGB(barkDark, bark, 0.4 + t * 0.6), (t) => (glow > 0 && depth <= 1 ? t * t * glow * 0.3 : 0), depth === 0);
+    b.tube(path, (t) => rad * (1 - t * 0.72), depth === P.depth ? 7 : depth >= P.depth - 1 ? 5 : 4, (t) => mixRGB(barkDark, bark, 0.4 + t * 0.6), (t) => (glow > 0 && depth <= 1 ? t * t * glow * 0.3 : 0), depth === 0);
     const end = path[path.length - 1];
     const endDir = end.clone().sub(path[path.length - 2]).normalize();
-    if (depth <= 0) {
+    const n = P.branches + r.int(-1, 1);
+    if (depth <= 0 || budget < n) {
       foliage(end, endDir, len);
       return;
     }
-    const n = P.branches + r.int(-1, 1);
+    budget -= n;
     for (let i = 0; i < n; i++) {
       const t = r.range(0.45, 1);
       const idx = Math.min(path.length - 1, Math.round(t * (path.length - 1)));
-      const at = path[idx];
       const nd = coneDir(endDir, r.range(0.5, 1.1), r);
       nd.y = Math.max(nd.y, -0.2);
-      branch(at, nd.normalize(), len * r.range(0.55, 0.75), rad * (1 - t * 0.6) * 0.7, depth - 1);
+      queue.push({ start: path[idx], dir: nd.normalize(), len: len * r.range(0.55, 0.75), rad: rad * (1 - t * 0.6) * 0.7, depth: depth - 1 });
     }
     if (r.chance(0.5)) foliage(end, endDir, len);
   };
@@ -115,7 +120,7 @@ function genTree(b: GeoBuilder, d: FloraDef, r: RNG): void {
     switch (canopy) {
       case 0: {
         // Puffy leaf clusters
-        const k = r.int(1, 3);
+        const k = b.lod ? 1 : r.int(1, 3);
         for (let i = 0; i < k; i++) {
           const c = at.clone().add(v3(r.range(-1, 1), r.range(-0.3, 0.8), r.range(-1, 1)).multiplyScalar(size * 0.7));
           const s = size * r.range(0.8, 1.3);
@@ -129,7 +134,7 @@ function genTree(b: GeoBuilder, d: FloraDef, r: RNG): void {
       }
       case 1: {
         // Hanging glowing tendrils
-        const k = r.int(4, 8);
+        const k = b.lod ? 2 : r.int(4, 8);
         b.windOverride = 1;
         for (let i = 0; i < k; i++) {
           const s = at.clone().add(v3(r.range(-0.4, 0.4), 0, r.range(-0.4, 0.4)));
@@ -161,7 +166,11 @@ function genTree(b: GeoBuilder, d: FloraDef, r: RNG): void {
   };
 
   const trunkDir = v3(r.range(-0.12, 0.12), 1, r.range(-0.12, 0.12)).normalize();
-  branch(v3(0, -0.3, 0), trunkDir, H * 0.55, trunkR, P.depth);
+  queue.push({ start: v3(0, -0.3, 0), dir: trunkDir, len: H * 0.55, rad: trunkR, depth: P.depth });
+  while (queue.length) {
+    const q = queue.shift()!;
+    branch(q.start, q.dir, q.len, q.rad, q.depth);
+  }
 }
 
 function genBoneTree(b: GeoBuilder, d: FloraDef, r: RNG): void {
@@ -283,7 +292,7 @@ function mushroom(b: GeoBuilder, at: V3, H: number, capR: number, flat: number, 
   m.multiply(new THREE.Matrix4().makeRotationFromQuaternion(q));
   b.with(m, () => {
     const sr = capR * 0.18;
-    b.lathe([[sr * 1.6, -0.1], [sr * 1.1, H * 0.1], [sr, H * 0.5], [sr * 0.85, H * 0.9], [sr * 1.1, H]], 8, (v) => mixRGB(scaleRGB(stemC, 0.8), stemC, v), (v) => glow * 0.2 * v, 0.05, r.next() * 10);
+    b.lathe([[sr * 1.6, -0.1], [sr * 1.1, H * 0.1], [sr, H * 0.5], [sr * 0.85, H * 0.9], [sr * 1.1, H]], capR > 2 ? 10 : 6, (v) => mixRGB(scaleRGB(stemC, 0.8), stemC, v), (v) => glow * 0.2 * v, 0.05, r.next() * 10);
     const top = H + capR * (1 - flat) * 0.9;
     const prof: [number, number][] = [
       [sr * 1.1, H - capR * 0.05],
@@ -294,9 +303,9 @@ function mushroom(b: GeoBuilder, at: V3, H: number, capR: number, flat: number, 
       [capR * 0.35, top * 0.98 + H * 0.02],
       [0.01, top],
     ];
-    b.lathe(prof, 14, (v) => (v < 0.3 ? gillC : mixRGB(capC, scaleRGB(capC, 1.2), v)), (v) => (v < 0.3 ? glow : glow * 0.12), 0.06, r.next() * 10);
+    b.lathe(prof, capR > 2 ? 16 : 10, (v) => (v < 0.3 ? gillC : mixRGB(capC, scaleRGB(capC, 1.2), v)), (v) => (v < 0.3 ? glow : glow * 0.12), 0.06, r.next() * 10);
     // Spots
-    const spots = r.int(0, 7);
+    const spots = b.lod ? 0 : r.int(0, 7);
     for (let i = 0; i < spots; i++) {
       const a = r.next() * Math.PI * 2;
       const t = r.range(0.2, 0.8);

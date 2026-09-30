@@ -8,6 +8,7 @@ import { hash01 } from '../core/rng';
 import { ColliderSource } from '../player/Player';
 
 interface MeshSlot {
+  tier: number;
   mesh: THREE.InstancedMesh;
   capacity: number;
   def: FloraDef;
@@ -42,6 +43,10 @@ export interface DestroyedProp {
   scale: number;
 }
 
+function slotKey(floraId: number, variant: number, tier: number): number {
+  return floraId * 16 + variant * 2 + tier;
+}
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
@@ -69,21 +74,26 @@ export class PropManager implements PropSink, ColliderSource {
 
   /** Builds all species geometry up front (a few hundred ms), so streaming never stalls. */
   prebuild(): void {
-    for (const def of this.params.flora) for (let v = 0; v < def.variants; v++) this.slot(def.id, v);
+    for (const def of this.params.flora)
+      for (let v = 0; v < def.variants; v++) {
+        this.slot(def.id, v, 0);
+        if (def.maxLevel >= 2) this.slot(def.id, v, 1);
+      }
   }
 
-  private slot(floraId: number, variant: number): MeshSlot {
-    const key = floraId * 8 + variant;
+  /** Tier 0: full detail with shadows (near chunks); tier 1: simplified, no shadows (far). */
+  private slot(floraId: number, variant: number, tier: number): MeshSlot {
+    const key = slotKey(floraId, variant, tier);
     let s = this.slots.get(key);
     if (s) return s;
     const def = this.params.flora[floraId];
-    const geo = buildFloraVariant(def, variant);
-    s = this.makeSlot(geo, def, 64);
+    const geo = buildFloraVariant(def, variant, tier);
+    s = this.makeSlot(geo, def, 64, tier);
     this.slots.set(key, s);
     return s;
   }
 
-  private makeSlot(geo: THREE.BufferGeometry, def: FloraDef, capacity: number): MeshSlot {
+  private makeSlot(geo: THREE.BufferGeometry, def: FloraDef, capacity: number, tier: number): MeshSlot {
     const mesh = new THREE.InstancedMesh(geo, this.material, capacity);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
@@ -91,11 +101,11 @@ export class PropManager implements PropSink, ColliderSource {
     geo.setAttribute('aInst', inst);
     mesh.count = 0;
     mesh.frustumCulled = false;
-    const big = def.kind !== 'grass' && def.kind !== 'pebble' && def.kind !== 'vine' && def.kind !== 'glowcap';
-    mesh.castShadow = big;
+    const big = def.kind !== 'grass' && def.kind !== 'pebble' && def.kind !== 'vine' && def.kind !== 'glowcap' && def.kind !== 'stalactite';
+    mesh.castShadow = big && tier === 0;
     mesh.receiveShadow = true;
     this.group.add(mesh);
-    return { mesh, capacity, def, inst };
+    return { mesh, capacity, def, inst, tier };
   }
 
   private grow(s: MeshSlot, need: number): void {
@@ -104,7 +114,7 @@ export class PropManager implements PropSink, ColliderSource {
     const geo = s.mesh.geometry;
     this.group.remove(s.mesh);
     s.mesh.dispose();
-    const fresh = this.makeSlot(geo, s.def, cap);
+    const fresh = this.makeSlot(geo, s.def, cap, s.tier);
     s.mesh = fresh.mesh;
     s.capacity = cap;
     s.inst = fresh.inst;
@@ -122,10 +132,11 @@ export class PropManager implements PropSink, ColliderSource {
   private prepare(level: number, data: Float32Array): ChunkProps {
     const counts = new Map<number, number>();
     const n = data.length / PROP_STRIDE;
+    const tier = level <= 1 ? 0 : 1;
     for (let i = 0; i < n; i++) {
       const o = i * PROP_STRIDE;
       if (this.destroyed.has(data[o + 10])) continue;
-      const key = data[o] * 8 + data[o + 1];
+      const key = slotKey(data[o], data[o + 1], this.params.flora[data[o]].maxLevel >= 2 ? tier : 0);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     const groups = new Map<number, ChunkGroup>();
@@ -137,7 +148,7 @@ export class PropManager implements PropSink, ColliderSource {
       if (this.destroyed.has(uid)) continue;
       const fid = data[o], variant = data[o + 1];
       const def = this.params.flora[fid];
-      const g = groups.get(fid * 8 + variant)!;
+      const g = groups.get(slotKey(fid, variant, def.maxLevel >= 2 ? tier : 0))!;
       _p.set(data[o + 2], data[o + 3], data[o + 4]);
       _u.set(data[o + 5], data[o + 6], data[o + 7]);
       const scale = data[o + 9];

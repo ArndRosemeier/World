@@ -249,7 +249,7 @@ export class ChunkManager {
       g.boundingSphere = new THREE.Sphere(new THREE.Vector3(n.minX + s / 2, n.minY + s / 2, n.minZ + s / 2), s * 0.9);
       g.boundingBox = new THREE.Box3(new THREE.Vector3(n.minX - s * 0.1, n.minY - s * 0.1, n.minZ - s * 0.1), new THREE.Vector3(n.minX + s * 1.1, n.minY + s * 1.1, n.minZ + s * 1.1));
       const mesh = new THREE.Mesh(g, this.material);
-      mesh.castShadow = n.level <= 2;
+      mesh.castShadow = n.level <= 1;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       mesh.visible = false;
@@ -304,8 +304,8 @@ export class ChunkManager {
       }
     }
     this.stats.nodes++;
+    const buried = this.cullBuried && n.minY + n.size + 12 < n.minH && n.distanceTo(this.camPos) > 150;
     if (n.mesh) {
-      const buried = this.cullBuried && n.minY + n.size + 12 < n.minH && n.distanceTo(this.camPos) > 150;
       n.mesh.visible = visible && !buried;
       if (n.mesh.visible) {
         this.stats.visible++;
@@ -317,7 +317,8 @@ export class ChunkManager {
     // Props follow chunk visibility.
     if (this.propSink) {
       const shown = this.shownProps.get(n.key) === n;
-      const wantProps = visible && !!n.props;
+      // Props of buried chunks (caves seen from the surface) are skipped like their meshes.
+      const wantProps = visible && !!n.props && !buried && !(this.cullBuried && n.minY + n.size < n.minH - 4 && n.distanceTo(this.camPos) > 40);
       if (wantProps && (!shown || n.propsVersion !== n.meshVersion)) {
         this.propSink.setChunkProps(n.key, n.level, n.props);
         this.shownProps.set(n.key, n);

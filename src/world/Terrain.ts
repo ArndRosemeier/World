@@ -106,10 +106,10 @@ export class Terrain {
   /** Picks the two nearest biomes in climate space and a blend weight for the second one. */
   private biomeAt(x: number, z: number, out: Column): void {
     const n = this.nB;
-    const wx = x + 500 * n.n2(x / 1700, z / 1700);
-    const wz = z + 500 * n.n2(x / 1700 + 50, z / 1700 - 50);
-    const T = clamp(0.5 + 0.85 * n.fbm2(wx / 3000, wz / 3000, 3), 0, 1);
-    const M = clamp(0.5 + 0.85 * n.fbm2(wx / 3000 + 91.7, wz / 3000 - 37.1, 3), 0, 1);
+    const wx = x + 900 * n.n2(x / 3100, z / 3100);
+    const wz = z + 900 * n.n2(x / 3100 + 50, z / 3100 - 50);
+    const T = clamp(0.5 + 0.9 * n.fbm2(wx / 6500, wz / 6500, 3), 0, 1);
+    const M = clamp(0.5 + 0.9 * n.fbm2(wx / 6500 + 91.7, wz / 6500 - 37.1, 3), 0, 1);
     const biomes = this.p.biomes;
     let d0 = 9, d1 = 9, i0 = 0, i1 = 0;
     for (let i = 0; i < biomes.length; i++) {

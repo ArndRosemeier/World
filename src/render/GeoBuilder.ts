@@ -21,6 +21,8 @@ export class GeoBuilder {
   private stack: THREE.Matrix4[] = [new THREE.Matrix4()];
   /** Explicit wind weight for subsequent vertices (NaN = derive from height). */
   windOverride = NaN;
+  /** Low-detail mode for distant instances: fewer sides, coarser spheres, shorter paths. */
+  lod = 0;
 
   get matrix(): THREE.Matrix4 {
     return this.stack[this.stack.length - 1];
@@ -38,6 +40,10 @@ export class GeoBuilder {
     this.push(m);
     fn();
     this.pop();
+  }
+
+  get triangleCount(): number {
+    return this.idx.length / 3;
   }
 
   get vertexCount(): number {
@@ -70,6 +76,10 @@ export class GeoBuilder {
    * radius(t), color(t) and glow(t) take t in [0, 1] along the path.
    */
   tube(path: V3[], radius: (t: number) => number, sides: number, color: (t: number) => RGB, glow: (t: number) => number = () => 0, cap = true): void {
+    if (this.lod) {
+      sides = Math.max(3, Math.ceil(sides / 2));
+      if (path.length > 3) path = path.filter((_, i) => i % 2 === 0 || i === path.length - 1);
+    }
     const n = path.length;
     if (n < 2) return;
     const tangents: V3[] = [];
@@ -118,6 +128,7 @@ export class GeoBuilder {
 
   /** Surface of revolution around +Y. profile: [radius, y] pairs from bottom to top. */
   lathe(profile: [number, number][], sides: number, color: (v: number, a: number) => RGB, glow: (v: number) => number = () => 0, wobble = 0, seed = 0): void {
+    if (this.lod) sides = Math.max(4, Math.ceil(sides / 2));
     const rows: number[] = [];
     const n = profile.length;
     for (let i = 0; i < n; i++) {
@@ -147,6 +158,7 @@ export class GeoBuilder {
 
   /** Icosphere with optional displacement. */
   blob(center: V3, scale: V3, detail: number, color: (p: V3, n: V3) => RGB, glow = 0, displace?: (dir: V3) => number): void {
+    if (this.lod) detail = Math.max(0, detail - 1);
     const geo = new THREE.IcosahedronGeometry(1, detail);
     const merged = mergeVertices(geo);
     const p = merged.getAttribute('position');
