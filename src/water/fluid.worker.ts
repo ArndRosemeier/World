@@ -59,7 +59,7 @@ function tick(): void {
   sim.processCreates(4);
   // Run as many steps as fit in the budget (fast flow when little water is moving)
   let steps = 0;
-  while (sim.awakeCount > 0 && performance.now() - t0 < 12 && steps < 4) {
+  while (sim.awakeCount > 0 && performance.now() - t0 < 14 && steps < 6) {
     sim.step();
     steps++;
   }

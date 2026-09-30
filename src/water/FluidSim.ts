@@ -39,6 +39,12 @@ export interface FChunk {
   steps: number;
   hasSource: boolean;
   frozen: boolean;
+  /** BFS stamps for the hydrostatic pass. */
+  visit: Uint32Array;
+  /** Source cells touching open cells below their level (null = needs recomputing). */
+  iface: Int32Array | null;
+  /** Filled by the hydrostatic pass this step (keeps the chunk awake). */
+  fed: boolean;
 }
 
 const idx = (x: number, y: number, z: number) => x + FC * (y + FC * z);
@@ -93,13 +99,17 @@ export class FluidSim {
       kind: new Uint8Array(N), mass: new Float32Array(N), next: new Float32Array(N),
       vx: new Float32Array(N), vy: new Float32Array(N), vz: new Float32Array(N),
       awake: true, calm: 0, dirty: true, steps: 0, hasSource: false, frozen: false,
+      visit: new Uint32Array(N), iface: null, fed: false,
     };
     this.classify(ch);
     this.chunks.set(key, ch);
     // Existing water in neighbours may now flow in
     for (const [dx, dy, dz] of NEIGHBOURS) {
       const n = this.chunks.get(FluidSim.key(cx + dx, cy + dy, cz + dz));
-      if (n) this.wake(n);
+      if (n) {
+        n.iface = null;
+        this.wake(n);
+      }
     }
     return ch;
   }
@@ -141,14 +151,15 @@ export class FluidSim {
         }
       }
     ch.next.set(ch.mass);
+    ch.iface = null;
   }
 
   wake(ch: FChunk): void {
     if (!ch.awake) {
       ch.awake = true;
       ch.next.set(ch.mass);
+      ch.calm = 0;
     }
-    ch.calm = 0;
   }
 
   /** An edit happened: rebuild affected chunks and wake the water around it. */
@@ -196,6 +207,7 @@ export class FluidSim {
 
   /** One simulation step over all awake chunks. */
   step(): void {
+    this.hydro();
     const awake: FChunk[] = [];
     for (const ch of this.chunks.values()) if (ch.awake && !ch.frozen) awake.push(ch);
     for (const ch of awake) ch.next.set(ch.mass);
@@ -235,10 +247,8 @@ export class FluidSim {
             }
             ch.vx[i] = ch.vx[i] * 0.85 + hx * 0.6;
             ch.vz[i] = ch.vz[i] * 0.85 + hz * 0.6;
-            if (remaining <= MIN_MASS) continue;
-            // Up (pressure)
-            fl = this.flowTo(ch, x, y + 1, z, x0, y0, z0, remaining, 'up', touched);
-            if (fl > 0) next[i] -= fl;
+            // (No upward "pressure" flow: the hydrostatic pass equalises levels, and upward
+            // leakage from an infinite source would climb above sea level.)
           }
     }
 
@@ -252,15 +262,17 @@ export class FluidSim {
         if (kind[i] === SOURCE) v = MAX_MASS;
         else if (kind[i] === SOLID) v = 0;
         else if (v < MIN_MASS) v = 0;
-        change += Math.abs(v - mass[i]);
+        const dv = Math.abs(v - mass[i]);
+        if (dv > change) change = dv;
         mass[i] = v;
       }
       ch.steps++;
-      if (change > 0.03) {
+      if (change > 0.002 || ch.fed) {
+        ch.fed = false;
         ch.dirty = true;
         ch.calm = 0;
         ch.awake = true;
-      } else if (++ch.calm > 25) {
+      } else if (++ch.calm > 30) {
         ch.awake = false;
         ch.vx.fill(0);
         ch.vy.fill(0);
@@ -289,18 +301,13 @@ export class FluidSim {
       if (n.frozen) return 0;
       target = n;
       i = j;
-      if (!n.awake) {
-        this.wake(n);
-      }
-      touched.add(n);
     } else i = idx(x, y, z);
     if (target.kind[i] === SOLID) return 0;
     const other = target.mass[i];
     let flow: number;
     if (mode === 'down') {
-      flow = stable(remaining + other) - other;
-      if (flow > MIN_FLOW) flow *= 0.5;
-      flow = Math.max(0, Math.min(flow, MAX_SPEED, remaining));
+      // Incompressible: a cell never holds more than one cell of water
+      flow = Math.max(0, Math.min(MAX_MASS - Math.max(other, target.next[i]), MAX_SPEED, remaining));
       // Falling water hitting a pool throws up a splash
       if (flow > 0.3 && y >= 0 && y < FC && ch.vy[idx(Math.min(FC - 1, Math.max(0, x)), Math.min(FC - 1, y + 1), Math.min(FC - 1, Math.max(0, z)))] < -0.3 && Math.random() < 0.02) {
         this.splashes.push({ x: x0 + x + 0.5, y: y0 + y + 1, z: z0 + z + 0.5, s: flow });
@@ -310,15 +317,148 @@ export class FluidSim {
       if (flow > MIN_FLOW) flow *= 0.5;
       flow = Math.max(0, Math.min(flow, MAX_SPEED, remaining));
     } else {
-      flow = (mode - other) / 4;
-      if (flow > MIN_FLOW) flow *= 0.5;
-      flow = Math.max(0, Math.min(flow, remaining));
+      flow = (mode - other) / 3;
+      flow = Math.max(0, Math.min(flow, remaining, MAX_MASS - Math.max(other, target.next[i])));
     }
-    // Ignore micro-flows: they only keep settled water awake
-    if (flow < MIN_FLOW * 0.25) return 0;
+    if (flow < 1e-5) return 0;
+    if (target !== ch) {
+      // Trickles don't wake sleeping neighbours; real flows do
+      if (!target.awake) {
+        if (flow < 0.002) return 0;
+        this.wake(target);
+      }
+      touched.add(target);
+    }
     target.next[i] += flow;
     if (target !== ch) target.dirty = true;
     return flow;
+  }
+
+  // --- Hydrostatic pressure ----------------------------------------------------------------
+  //
+  // Local cell rules only move water by diffusion, which is hopelessly slow over distance.
+  // Real water is pushed by pressure: anything connected to a sea or lake through a flooded
+  // path gets fed at the far end of that path immediately. We flood-fill the pressurised body
+  // (full cells connected to a source) each step and pour water into its open boundary cells,
+  // up to the source's level, lowest and supported cells fastest.
+
+  private stamp = 1;
+  private nbCh: FChunk | null = null;
+  private nbI = 0;
+
+  /** Neighbour of cell i in chunk ch along axis dir (0..5: +x -x +y -y +z -z) into nbCh/nbI. */
+  private neighbour(ch: FChunk, i: number, dir: number): boolean {
+    let x = i & 15, y = (i >> 4) & 15, z = i >> 8;
+    if (dir === 0) x++;
+    else if (dir === 1) x--;
+    else if (dir === 2) y++;
+    else if (dir === 3) y--;
+    else if (dir === 4) z++;
+    else z--;
+    if (x >= 0 && y >= 0 && z >= 0 && x < FC && y < FC && z < FC) {
+      this.nbCh = ch;
+      this.nbI = x + FC * (y + FC * z);
+      return true;
+    }
+    const cx = ch.cx + (x < 0 ? -1 : x >= FC ? 1 : 0), cy = ch.cy + (y < 0 ? -1 : y >= FC ? 1 : 0), cz = ch.cz + (z < 0 ? -1 : z >= FC ? 1 : 0);
+    const n = this.chunks.get(FluidSim.key(cx, cy, cz));
+    if (!n) {
+      if (this.inRange(cx, cy, cz)) this.createQueue.add(FluidSim.key(cx, cy, cz));
+      return false;
+    }
+    this.nbCh = n;
+    this.nbI = (x & 15) + FC * ((y & 15) + FC * (z & 15));
+    return true;
+  }
+
+  private levelOf(wy: number): number {
+    return wy < -150 ? this.params.under.liquidLevel : this.params.seaLevel;
+  }
+
+  private computeIface(ch: FChunk): Int32Array {
+    const out: number[] = [];
+    if (ch.hasSource) {
+      const y0 = ch.cy * FC;
+      for (let i = 0; i < N; i++) {
+        if (ch.kind[i] !== SOURCE) continue;
+        const level = this.levelOf(y0 + ((i >> 4) & 15));
+        for (let d = 0; d < 6; d++) {
+          if (!this.neighbour(ch, i, d)) continue;
+          const n = this.nbCh!, j = this.nbI;
+          if (n.kind[j] === AIR && n.cy * FC + ((j >> 4) & 15) < level) {
+            out.push(i);
+            break;
+          }
+        }
+      }
+    }
+    return new Int32Array(out);
+  }
+
+  private hydro(): void {
+    const full = ++this.stamp;
+    const edge = ++this.stamp;
+    const qc: FChunk[] = [];
+    const qi: number[] = [];
+    const ql: number[] = [];
+    for (const ch of this.chunks.values()) {
+      if (!ch.hasSource || ch.frozen) continue;
+      if (!ch.iface) ch.iface = this.computeIface(ch);
+      const y0 = ch.cy * FC;
+      for (const i of ch.iface) {
+        qc.push(ch);
+        qi.push(i);
+        ql.push(this.levelOf(y0 + ((i >> 4) & 15)));
+      }
+    }
+    if (!qc.length) return;
+    const bc: FChunk[] = [];
+    const bi: number[] = [];
+    const bcap: number[] = [];
+    for (let h = 0; h < qc.length && h < 150000; h++) {
+      const ch = qc[h], i = qi[h], level = ql[h];
+      for (let d = 0; d < 6; d++) {
+        if (!this.neighbour(ch, i, d)) continue;
+        const n = this.nbCh!, j = this.nbI;
+        if (n.kind[j] !== AIR || n.frozen) continue;
+        const v = n.visit[j];
+        if (v === full || v === edge) continue;
+        if (n.mass[j] >= 0.97) {
+          n.visit[j] = full;
+          qc.push(n);
+          qi.push(j);
+          ql.push(level);
+          continue;
+        }
+        const wy = n.cy * FC + ((j >> 4) & 15);
+        const cap = Math.min(1, Math.max(0, level - wy));
+        if (cap > n.mass[j] + 0.02) {
+          n.visit[j] = edge;
+          bc.push(n);
+          bi.push(j);
+          bcap.push(cap);
+        }
+      }
+    }
+    // Pour into the boundary: supported cells fill fast, overhanging ones spout and fall
+    for (let k = 0; k < bc.length; k++) {
+      const n = bc[k], j = bi[k];
+      let supported = true;
+      if (this.neighbour(n, j, 3)) {
+        const b = this.nbCh!, bj = this.nbI;
+        supported = b.kind[bj] !== AIR || b.mass[bj] >= 0.97;
+      }
+      const add = Math.min(bcap[k] - n.mass[j], supported ? 0.6 : 0.25, MAX_MASS - n.mass[j]);
+      if (add <= 0) continue;
+      if (!n.awake) this.wake(n);
+      n.mass[j] += add;
+      n.vy[j] = Math.min(n.vy[j], supported ? 0 : -0.3);
+      if (add > 0.02) {
+        n.fed = true;
+        n.dirty = true;
+        n.calm = 0;
+      }
+    }
   }
 
   /** Create chunks water wanted to flow into (a few per tick, they need terrain sampling). */
