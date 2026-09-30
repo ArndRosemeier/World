@@ -18,6 +18,9 @@ import { Input } from './player/Input';
 import { Tools } from './player/Tools';
 import { Audio } from './player/Audio';
 import { Hud } from './ui/Hud';
+import { Liquids } from './render/Liquids';
+import { Avatar } from './player/Avatar';
+import { RGB } from './core/math';
 import { MapView } from './ui/MapView';
 import { clamp, lerp, rgbCss, smoothstep } from './core/math';
 
@@ -77,7 +80,14 @@ export class Game {
   private savedRev = -1;
   private propsDestroyedCount = 0;
   private fps = 60;
-  private resume: HTMLDivElement;
+  private menu: HTMLDivElement;
+  readonly liquids: Liquids;
+  readonly avatar: Avatar;
+  thirdPerson = false;
+  private camDist = 4.5;
+  private submerged = 0;
+  private wasInLiquid = false;
+  private noSave = false;
   running = false;
 
   constructor(readonly seed: string, quality: Quality, container: HTMLElement) {
@@ -113,6 +123,9 @@ export class Game {
     this.chunks.viewDistance = Q.view;
     this.scene.add(this.chunks.group);
 
+    this.liquids = new Liquids(P, this.pool);
+    this.scene.add(this.liquids.group);
+
     this.props = new PropManager(P);
     this.chunks.setPropSink(this.props);
     this.scene.add(this.props.group);
@@ -144,6 +157,8 @@ export class Game {
 
     this.player = new Player(this.world);
     this.player.sources.push(this.props, this.settlements);
+    this.player.liquidTest = (p) => this.liquids.submerged(p);
+    this.avatar = new Avatar(P.seed, P.biomes[0].top);
     this.input = new Input(this.renderer.domElement);
     this.tools = new Tools(this.world, this.chunks, this.props, this.settlements, this.creatures, this.debris, this.dust, this.glow, this.audio);
     this.scene.add(this.tools.marker);
@@ -158,14 +173,11 @@ export class Game {
     this.settlements.onDiscover = (s) => this.hud.toast(s.name, `a ${s.civ.layer === 'under' ? 'deep ' : ''}settlement of the ${s.civ.people}`, rgbCss(s.civ.glow));
     this.settlements.onGreet = () => this.audio.chirp();
 
-    this.resume = document.createElement('div');
-    this.resume.id = 'resume';
-    this.resume.textContent = 'CLICK TO EXPLORE';
-    this.resume.classList.add('hidden');
-    document.body.appendChild(this.resume);
-    this.resume.addEventListener('click', () => this.input.lock());
+    this.menu = this.buildMenu();
+    document.body.appendChild(this.menu);
     this.input.onLockChange = (locked) => {
-      this.resume.classList.toggle('hidden', locked || this.map.open || !this.running);
+      this.menu.classList.toggle('hidden', locked || this.map.open || !this.running);
+      if (!locked) this.refreshMenu();
     };
 
     addEventListener('resize', () => this.resize());
@@ -202,7 +214,8 @@ export class Game {
       const step = () => {
         this.camera.updateMatrixWorld();
         this.chunks.update(this.camera.position, this.camera);
-        const r = this.chunks.readiness(this.camera.position, 300);
+        this.liquids.prime(this.camera.position);
+        const r = this.chunks.readiness(this.camera.position, 300) * (this.liquids.ready ? 1 : 0.95);
         const t = (performance.now() - start) / 1000;
         progress(0.12 + 0.86 * Math.min(1, r), `Streaming world… ${Math.round(r * 100)}%`);
         if ((r > 0.97 && t > 1) || t > 25) resolve();
@@ -269,10 +282,12 @@ export class Game {
     }
     if (I.pressed('KeyL')) this.lampOn = this.lampOn === null ? !this.lampAuto() : !this.lampOn;
     if (I.pressed('KeyG')) this.cycleQuality();
+    if (I.pressed('KeyC')) this.toggleCamera();
     this.sky.timeScale = I.down('KeyT') ? 60 : 1;
 
     if (!this.map.open) {
       this.player.update(dt, I, this.camera);
+      this.placeCamera(dt);
       this.tools.update(dt, I, this.player, this.camera);
       if (this.player.stepEvent) {
         this.player.stepEvent = false;
@@ -313,7 +328,10 @@ export class Game {
     this.dust.update(dt, _up);
     this.glow.update(dt, _up);
 
+    this.updateAvatarAndLiquids(dt, t, st, under);
+
     this.dynamicBatch.begin();
+    if (this.thirdPerson && this.camDist > 0.9) this.avatar.render(this.dynamicBatch, _ground.copy(this.player.pos).addScaledVector(this.player.up, -0.42), this.player.up, this.player.lookDir(_look), this.env.sky, TOOL_GLOW[this.tools.tool], t);
     this.creatures.render();
     this.debris.render();
     this.settlements.renderDynamic(t, night);
@@ -332,6 +350,142 @@ export class Game {
     I.endFrame();
   }
 
+  // --- Camera, avatar, liquids -------------------------------------------------------------
+
+  private toggleCamera(): void {
+    this.thirdPerson = !this.thirdPerson;
+    if (this.thirdPerson) {
+      this.camDist = 0.5;
+      this.avatar.reset(_ground.copy(this.player.pos).addScaledVector(this.player.up, -0.42), this.player.up, this.player.forward);
+    }
+    this.hud.toast(this.thirdPerson ? 'Third person' : 'First person', '', '#9fe8ff');
+  }
+
+  /** Third person: an over-the-shoulder camera that never clips into the terrain. */
+  private placeCamera(dt: number): void {
+    if (!this.thirdPerson) return;
+    const P = this.player;
+    const eye = P.eye.clone();
+    const look = P.lookDir(_look);
+    const right = _right.crossVectors(P.forward, P.up).normalize();
+    const want = 4.6;
+    const offset = new THREE.Vector3().addScaledVector(look, -1).addScaledVector(right, 0.12).addScaledVector(P.up, 0.1).normalize();
+    const hit = this.world.raycast(eye, offset, want + 0.4);
+    let allowed = hit ? Math.max(0.2, hit.distance - 0.35) : want;
+    // Also keep the camera out of trees, rocks and buildings
+    const probe = new THREE.Vector3(), push = new THREE.Vector3(), n = new THREE.Vector3();
+    for (let d = 0.6; d < allowed; d += 0.3) {
+      probe.copy(eye).addScaledVector(offset, d);
+      if (P.sources.some((src) => src.resolveSphere(probe, 0.25, push, n))) {
+        allowed = Math.max(0.2, d - 0.3);
+        break;
+      }
+    }
+    this.camDist = allowed < this.camDist ? allowed : lerp(this.camDist, allowed, 1 - Math.exp(-dt * 3));
+    this.camera.position.copy(eye).addScaledVector(offset, this.camDist).addScaledVector(right, 0.35 * Math.min(1, this.camDist / 2));
+  }
+
+  private updateAvatarAndLiquids(dt: number, t: number, st: Sky['state'], under: number): void {
+    const P = this.player;
+    const ground = _ground.copy(P.pos).addScaledVector(P.up, -0.42);
+    this.avatar.update(dt, this.world, ground, P.up, P.vel, P.lookDir(_look), P.grounded, P.mode === 'fly', P.jetting, this.glow);
+
+    // Splashes when entering or leaving a liquid
+    if (P.inLiquid !== this.wasInLiquid && Math.abs(P.vel.dot(P.up)) > 1.5) {
+      const lc = P.pos.y < -150 ? this.world.params.under.liquid : this.world.params.liquid;
+      for (let i = 0; i < 26; i++) {
+        const a = Math.random() * Math.PI * 2, r = Math.random() * 1.2;
+        this.dust.emit(ground.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3, Math.sin(a) * r)), new THREE.Vector3(Math.cos(a) * 1.5, 3 + Math.random() * 4, Math.sin(a) * 1.5), [lc[0] * 0.6 + 0.4, lc[1] * 0.6 + 0.4, lc[2] * 0.6 + 0.4], 0.35, 1.2, { alpha: 0.7, grav: 9, drag: 0.5 });
+      }
+      this.audio.dig();
+    }
+    this.wasInLiquid = P.inLiquid;
+
+    const fog = this.scene.fog as THREE.FogExp2;
+    const sk = this.sky.uniforms;
+    const skyTop = new THREE.Color().copy(sk.uZenith.value).lerp(sk.uNZenith.value, 1 - st.day);
+    const horizon = new THREE.Color().copy(sk.uHorizon.value).lerp(sk.uNHorizon.value, 1 - st.day);
+    this.liquids.update(t, this.camera.position, {
+      sunDir: st.sunDir,
+      sunColor: st.sunLight,
+      skyTop,
+      horizon,
+      ambient: st.skyAmbient.clone().multiplyScalar(0.55),
+      fogColor: fog.color,
+      fogDensity: fog.density,
+      light: 0.5 + 0.5 * st.day,
+    }, under);
+    const target = this.liquids.submerged(this.camera.position) ? 1 : 0;
+    this.submerged = lerp(this.submerged, target, 1 - Math.exp(-dt * 10));
+  }
+
+  // --- Pause menu ------------------------------------------------------------------------------
+
+  private buildMenu(): HTMLDivElement {
+    const el = document.createElement('div');
+    el.id = 'menu';
+    el.classList.add('hidden');
+    el.innerHTML = `
+      <div class="panel">
+        <h2>${this.world.params.name}</h2>
+        <div class="seed">seed “${this.seed}”</div>
+        <button data-a="resume" class="primary">Resume</button>
+        <button data-a="camera"></button>
+        <button data-a="quality"></button>
+        <button data-a="help">Field manual</button>
+        <button data-a="main">Main menu</button>
+        <button data-a="reset" class="danger">Reset this world</button>
+        <div class="note">Your changes to this world are saved automatically.</div>
+      </div>`;
+    el.addEventListener('click', (e) => {
+      const a = (e.target as HTMLElement).closest('button')?.dataset.a;
+      if (!a) return;
+      this.audio.ui();
+      switch (a) {
+        case 'resume':
+          this.input.lock();
+          break;
+        case 'camera':
+          this.toggleCamera();
+          break;
+        case 'quality':
+          this.cycleQuality();
+          break;
+        case 'help':
+          this.hud.toggleHelp();
+          break;
+        case 'main':
+          this.save(true);
+          this.noSave = true;
+          location.href = `${location.pathname}?seed=${encodeURIComponent(this.seed)}`;
+          return;
+        case 'reset': {
+          const btn = el.querySelector<HTMLButtonElement>('button[data-a="reset"]')!;
+          if (btn.dataset.confirm !== '1') {
+            btn.dataset.confirm = '1';
+            btn.textContent = 'Click again to erase all changes';
+            return;
+          }
+          this.noSave = true;
+          this.resetSave();
+          location.href = `${location.pathname}?seed=${encodeURIComponent(this.seed)}&auto=1`;
+          return;
+        }
+      }
+      this.refreshMenu();
+    });
+    return el;
+  }
+
+  private refreshMenu(): void {
+    const q = (a: string) => this.menu.querySelector<HTMLButtonElement>(`button[data-a="${a}"]`)!;
+    q('camera').textContent = `View: ${this.thirdPerson ? 'third person' : 'first person'}  (C)`;
+    q('quality').textContent = `Quality: ${this.quality}  (G)`;
+    const reset = q('reset');
+    reset.dataset.confirm = '';
+    reset.textContent = 'Reset this world';
+  }
+
   private lampAuto(): boolean {
     return this.env.sky < 0.45 || this.env.under > 0.3 || this.sky.state.day < 0.25;
   }
@@ -348,6 +502,13 @@ export class Game {
     fog.color.copy(fogCol);
     const baseDensity = (0.00022 * P.sky.fog * 4200) / this.chunks.viewDistance;
     fog.density = lerp(lerp(baseDensity, 0.012, smoothstep(0.3, 1, enclosed) * (1 - under)), 0.0042, under);
+    // Underwater: the view closes in and takes on the liquid's colour
+    if (this.submerged > 0.01) {
+      const lc = under > 0.5 ? U.liquid : P.liquid;
+      const deep = new THREE.Color().setRGB(lc[0] * 0.3, lc[1] * 0.3, lc[2] * 0.3, THREE.SRGBColorSpace).multiplyScalar(0.3 + 0.7 * st.day);
+      fog.color.lerp(deep, this.submerged);
+      fog.density = lerp(fog.density, 0.045, this.submerged);
+    }
 
     // Sun and ambient
     const sp = this.player.pos;
@@ -498,7 +659,7 @@ export class Game {
     const col = T.columnAt(p.x, p.z);
     const up = this.player.up;
     if (up.y < 0.7 && T.moonAt(p.x, p.z)) return { main: 'Moonlet', sub: 'local gravity well', announce: true };
-    if (p.y < P.seaLevel + 0.5 && col.h < P.seaLevel) return { main: P.liquidName, sub: 'open liquid', announce: true };
+    if (p.y < P.seaLevel + 0.5 && p.y > P.seaLevel - 80 && col.h < P.seaLevel) return { main: P.liquidName, sub: 'open liquid', announce: true };
     const b = P.biomes[col.w1 > 0.45 ? col.b1 : col.b0];
     if (col.isR > 0 && p.y > col.h + 20) return { main: b.name, sub: 'floating island', announce: false };
     const lev = T.levitation(p.x, p.z);
@@ -551,6 +712,7 @@ export class Game {
   }
 
   private save(force: boolean): void {
+    if (this.noSave) return;
     this.saveTimer -= 1 / 60;
     if (!force && this.saveTimer > 0) return;
     this.saveTimer = 5;
@@ -584,6 +746,10 @@ export class Game {
 }
 
 const _up = new THREE.Vector3();
+const _ground = new THREE.Vector3();
+const _look = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const TOOL_GLOW: Record<string, RGB> = { dig: [0.6, 0.92, 1], build: [1, 0.82, 0.45], blast: [1, 0.4, 0.28], scan: [0.55, 1, 0.6] };
 const _moonDir = new THREE.Vector3();
 
 function tick(): Promise<void> {

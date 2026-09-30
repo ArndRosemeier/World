@@ -150,7 +150,7 @@ export function scatterProps(B: ChunkBuilder, job: ChunkJob, s: number): Float32
           const sink = f.sink * scale;
           const uid = hash4(f.id * 7919 + (isFloor ? 0 : 1), cx, cz, Math.floor(y / 6)) % 16777213;
           let sky = 1;
-          if (ceilingSpecies) sky = 0;
+          if (ceilingSpecies || Terrain.sealedFromSky(exactCol, y)) sky = 0;
           else if (y < exactCol.top) {
             for (const st of SKY_PROBES) {
               const yy = y + st;

@@ -9,6 +9,15 @@ declare const self: DedicatedWorkerGlobalScope;
 let builder: ChunkBuilder | null = null;
 let terrain: Terrain | null = null;
 
+/** A square depth mask for the liquid renderer. */
+export interface LiquidJob {
+  id: number;
+  x0: number;
+  z0: number;
+  size: number;
+  res: number;
+}
+
 export interface MapJob {
   id: number;
   x0: number;
@@ -34,14 +43,46 @@ self.onmessage = (ev: MessageEvent) => {
     const job = msg.job as MapJob;
     const px = renderMap(job);
     self.postMessage({ type: 'map', id: job.id, job, px }, [px.buffer]);
+    return;
+  }
+  if (msg.type === 'liquid') {
+    const job = msg.job as LiquidJob;
+    const px = renderLiquidMask(job);
+    self.postMessage({ type: 'liquid', id: job.id, job, px }, [px.buffer]);
   }
 };
+
+/**
+ * Liquid depth mask. R = depth of the sea (sea level minus ground), G = depth of underworld
+ * lakes. Both are encoded as (depth + 16) * 2, i.e. -16..111 m in half-metre steps.
+ */
+function renderLiquidMask(job: LiquidJob): Uint8ClampedArray {
+  const T = terrain!;
+  const P = T.p;
+  const out = new Uint8ClampedArray(job.res * job.res * 4);
+  const c = new Column();
+  const step = job.size / job.res;
+  const s = Math.max(2, Math.min(16, step));
+  const ul = P.under.liquidLevel;
+  for (let j = 0; j < job.res; j++)
+    for (let i = 0; i < job.res; i++) {
+      const x = job.x0 + (i + 0.5) * step, z = job.z0 + (j + 0.5) * step;
+      T.column(x, z, c, s);
+      const sea = P.seaLevel - c.h;
+      const lake = c.uOpen > 4 && c.uC > ul + 1 && c.h > ul + 30 ? ul - c.uF : -16;
+      const o = (i + j * job.res) * 4;
+      out[o] = (sea + 16) * 2;
+      out[o + 1] = (lake + 16) * 2;
+      out[o + 2] = 0;
+      out[o + 3] = 255;
+    }
+  return out;
+}
 
 function transferables(r: ChunkResult): Transferable[] {
   const t: Transferable[] = [];
   if (r.positions) t.push(r.positions.buffer, r.normals!.buffer, r.colors!.buffer, r.emit!.buffer, r.indices!.buffer);
   if (r.props) t.push(r.props.buffer);
-  if (r.water) for (const w of r.water) t.push(w.positions.buffer, w.depth.buffer, w.indices.buffer);
   return t;
 }
 

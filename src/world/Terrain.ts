@@ -810,6 +810,14 @@ export class Terrain {
     return STRATUM;
   }
 
+  /**
+   * Deep below the surface (outside sinkholes) there is never open sky, however tall the
+   * cavern above. Upward probes alone can't see a 150 m underworld ceiling.
+   */
+  static sealedFromSky(c: Column, y: number): boolean {
+    return y < c.h - 35 && c.shR === 0;
+  }
+
   /** Finalises a density value after edits (bedrock can't be removed). */
   static finalize(d: number, y: number): number {
     return Math.min(d, y - BEDROCK);

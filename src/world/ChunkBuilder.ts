@@ -33,7 +33,6 @@ export interface ChunkResult {
   colors?: Uint8Array;
   emit?: Uint8Array;
   indices?: Uint32Array;
-  water?: { positions: Float32Array; depth: Float32Array; indices: Uint32Array; glow: number } [];
   props?: Float32Array;
   /** Lowest surface height over the chunk (for buried-chunk culling). */
   minH?: number;
@@ -279,7 +278,8 @@ export class ChunkBuilder {
 
       // Sky visibility: exact probes straight up the column
       let sky = 1;
-      if (y < col.top) {
+      if (Terrain.sealedFromSky(col, y)) sky = 0;
+      else if (y < col.top) {
         const steps = SKY_STEPS;
         for (let q = 0; q < steps.length && sky > 0.01; q++) {
           const yy = y + steps[q] * Math.max(1, s * 0.5);
@@ -305,7 +305,6 @@ export class ChunkBuilder {
       emit[o * 4 + 3] = toByte(sky);
     }
 
-    const water = this.buildLiquids(job, s);
     const props = job.level <= 3 ? scatterProps(this, job, s) : undefined;
 
     let minH = Infinity;
@@ -317,7 +316,7 @@ export class ChunkBuilder {
     for (let e = 0; e < nEdits; e++) minH = Math.min(minH, edits[e * EDIT_STRIDE + 1] - edits[e * EDIT_STRIDE + 3] - 2);
     return {
       key: job.key, version: job.version, empty: false,
-      positions, normals, colors, emit, indices, water, props, minH,
+      positions, normals, colors, emit, indices, props, minH,
       ms: performance.now() - t0,
     };
   }
@@ -352,40 +351,6 @@ export class ChunkBuilder {
     return this.cols[clamp(i, 0, G - 1) + clamp(k, 0, G - 1) * G];
   }
 
-  private buildLiquids(job: ChunkJob, s: number): ChunkResult['water'] {
-    const out: NonNullable<ChunkResult['water']> = [];
-    const P = this.terrain.p;
-    const top = job.oy + CHUNK * s;
-    const layers: { level: number; glow: number; test: (c: Column) => number }[] = [];
-    if (P.seaLevel >= job.oy && P.seaLevel < top) layers.push({ level: P.seaLevel, glow: 0, test: (c) => P.seaLevel - c.h });
-    const ul = P.under.liquidLevel;
-    if (ul >= job.oy && ul < top) layers.push({ level: ul, glow: 1, test: (c) => (c.uOpen > 4 && c.uC > ul + 1 && c.h > ul + 30 ? ul - c.uF : -1) });
-    for (const L of layers) {
-      const vid = new Int32Array(G * G).fill(-1);
-      const p: number[] = [];
-      const dep: number[] = [];
-      const ind: number[] = [];
-      const getV = (i: number, k: number) => {
-        const id = i + k * G;
-        if (vid[id] >= 0) return vid[id];
-        const c = this.cols[id];
-        vid[id] = p.length / 3;
-        p.push(job.ox + (i - OFF) * s, L.level, job.oz + (k - OFF) * s);
-        dep.push(L.test(c));
-        return vid[id];
-      };
-      // Only owned cells: overlapping transparent quads would double up along chunk borders.
-      for (let k = OFF; k < OFF + CHUNK; k++)
-        for (let i = OFF; i < OFF + CHUNK; i++) {
-          const c0 = this.cols[i + k * G], c1 = this.cols[i + 1 + k * G], c2 = this.cols[i + (k + 1) * G], c3 = this.cols[i + 1 + (k + 1) * G];
-          if (L.test(c0) <= 0 && L.test(c1) <= 0 && L.test(c2) <= 0 && L.test(c3) <= 0) continue;
-          const a = getV(i, k), b = getV(i + 1, k), c = getV(i + 1, k + 1), d = getV(i, k + 1);
-          ind.push(a, c, b, a, d, c);
-        }
-      if (ind.length) out.push({ positions: new Float32Array(p), depth: new Float32Array(dep), indices: new Uint32Array(ind), glow: L.glow });
-    }
-    return out.length ? out : undefined;
-  }
 }
 
 const SKY_STEPS = [3, 7, 14, 26, 45, 80];

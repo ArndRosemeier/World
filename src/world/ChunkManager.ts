@@ -3,7 +3,7 @@ import { CHUNK, MAX_LEVEL, ROOT_SIZE, BEDROCK, WORLD_TOP } from './constants';
 import { WorkerPool } from './WorkerPool';
 import { ChunkResult } from './ChunkBuilder';
 import { EditStore, Edit, editBlend } from './Edits';
-import { createLiquidMaterial, createTerrainMaterial } from '../render/materials';
+import { createTerrainMaterial } from '../render/materials';
 import { WorldParams } from './WorldParams';
 
 // ---------------------------------------------------------------------------------------------
@@ -21,7 +21,6 @@ class Node {
   readonly minZ: number;
   children: Node[] | null = null;
   mesh: THREE.Mesh | null = null;
-  liquids: THREE.Mesh[] = [];
   props: Float32Array | null = null;
   ready = false;
   empty = false;
@@ -64,8 +63,6 @@ export interface PropSink {
 export class ChunkManager {
   readonly group = new THREE.Group();
   readonly material: THREE.MeshStandardMaterial;
-  readonly seaMaterial: THREE.MeshStandardMaterial;
-  readonly glowMaterial: THREE.MeshStandardMaterial;
   private roots = new Map<string, Node>();
   private frame = 0;
   private pool: WorkerPool;
@@ -86,8 +83,6 @@ export class ChunkManager {
     this.pool = pool;
     this.edits = edits;
     this.material = createTerrainMaterial();
-    this.seaMaterial = createLiquidMaterial(new THREE.Color().setRGB(...params.liquid, THREE.SRGBColorSpace), params.liquidGlow);
-    this.glowMaterial = createLiquidMaterial(new THREE.Color().setRGB(...params.under.liquid, THREE.SRGBColorSpace), 0.55);
     this.group.name = 'terrain';
   }
 
@@ -257,24 +252,6 @@ export class ChunkManager {
       n.mesh = mesh;
       this.group.add(mesh);
     }
-    if (r.water) {
-      for (const w of r.water) {
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.BufferAttribute(w.positions, 3));
-        g.setAttribute('aDepth', new THREE.BufferAttribute(w.depth, 1));
-        const nrm = new Float32Array(w.positions.length);
-        for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1;
-        g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-        g.setIndex(new THREE.BufferAttribute(w.indices, 1));
-        g.computeBoundingSphere();
-        const m = new THREE.Mesh(g, w.glow ? this.glowMaterial : this.seaMaterial);
-        m.matrixAutoUpdate = false;
-        m.visible = false;
-        m.renderOrder = 2;
-        n.liquids.push(m);
-        this.group.add(m);
-      }
-    }
   }
 
   private clearMesh(n: Node): void {
@@ -283,11 +260,6 @@ export class ChunkManager {
       n.mesh.geometry.dispose();
       n.mesh = null;
     }
-    for (const l of n.liquids) {
-      this.group.remove(l);
-      l.geometry.dispose();
-    }
-    n.liquids.length = 0;
   }
 
   /** Applies visibility, disposes unused meshes and subtrees. Returns whether anything below is alive. */
@@ -312,7 +284,6 @@ export class ChunkManager {
         this.stats.triangles += (n.mesh.geometry.index?.count ?? 0) / 3;
       }
     }
-    for (const l of n.liquids) l.visible = visible;
 
     // Props follow chunk visibility.
     if (this.propSink) {

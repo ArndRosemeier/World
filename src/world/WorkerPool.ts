@@ -1,5 +1,5 @@
 import type { ChunkJob, ChunkResult } from './ChunkBuilder';
-import type { MapJob } from './chunk.worker';
+import type { MapJob, LiquidJob } from './chunk.worker';
 
 interface Pending {
   job: ChunkJob;
@@ -16,8 +16,9 @@ export class WorkerPool {
   private busy: boolean[] = [];
   private queue = new Map<string, Pending>();
   private inflight = new Map<number, (r: ChunkResult) => void>();
-  private mapCbs = new Map<number, (px: Uint8ClampedArray, job: MapJob) => void>();
-  private mapQueue: MapJob[] = [];
+  private mapCbs = new Map<number, (px: Uint8ClampedArray, job: any) => void>();
+  private mapQueue: { type: 'map' | 'liquid'; job: MapJob | LiquidJob }[] = [];
+  private taskId = 1e6;
   readonly size: number;
   jobsDone = 0;
   totalMs = 0;
@@ -41,7 +42,7 @@ export class WorkerPool {
       this.jobsDone++;
       this.totalMs += msg.res.ms;
       cb?.(msg.res);
-    } else if (msg.type === 'map') {
+    } else if (msg.type === 'map' || msg.type === 'liquid') {
       const cb = this.mapCbs.get(msg.id);
       this.mapCbs.delete(msg.id);
       cb?.(msg.px, msg.job);
@@ -69,7 +70,15 @@ export class WorkerPool {
 
   requestMap(job: MapJob, cb: (px: Uint8ClampedArray, job: MapJob) => void): void {
     this.mapCbs.set(job.id, cb);
-    this.mapQueue.push(job);
+    this.mapQueue.push({ type: 'map', job });
+    this.pump();
+  }
+
+  /** Liquid masks jump the queue: the sea must follow the camera promptly. */
+  requestLiquid(job: Omit<LiquidJob, 'id'>, cb: (px: Uint8ClampedArray, job: LiquidJob) => void): void {
+    const full = { ...job, id: this.taskId++ };
+    this.mapCbs.set(full.id, cb);
+    this.mapQueue.unshift({ type: 'liquid', job: full });
     this.pump();
   }
 
@@ -85,10 +94,10 @@ export class WorkerPool {
     for (let i = 0; i < this.workers.length; i++) {
       if (this.busy[i]) continue;
       // Map tiles only use idle capacity, keeping one worker free for terrain when possible.
-      if (this.mapQueue.length && (this.queue.size === 0 || i === this.workers.length - 1)) {
-        const job = this.mapQueue.shift()!;
+      if (this.mapQueue.length && (this.queue.size === 0 || i === this.workers.length - 1 || this.mapQueue[0].type === 'liquid')) {
+        const task = this.mapQueue.shift()!;
         this.busy[i] = true;
-        this.workers[i].postMessage({ type: 'map', job });
+        this.workers[i].postMessage(task);
         continue;
       }
       if (this.queue.size === 0) continue;

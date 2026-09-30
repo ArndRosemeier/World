@@ -36,9 +36,13 @@ export class Player {
   mode: 'walk' | 'fly' = 'walk';
   grounded = false;
   inLiquid = false;
+  /** True while the jetpack is firing (for exhaust effects). */
+  jetting = false;
   fuel = 1;
   sensitivity = 0.0022;
   sources: ColliderSource[] = [];
+  /** Optional liquid test (the liquid system's baked masks); falls back to terrain columns. */
+  liquidTest: ((p: THREE.Vector3) => boolean) | null = null;
   private groundTime = 0;
   private bob = 0;
   stepEvent = false;
@@ -94,7 +98,7 @@ export class Player {
       const speed = sprint ? 90 : 22;
       const wish = new THREE.Vector3().addScaledVector(look, f).addScaledVector(right, s);
       if (input.down('Space')) wish.addScaledVector(this.up, 1);
-      if (input.down('ControlLeft') || input.down('KeyC')) wish.addScaledVector(this.up, -1);
+      if (input.down('ControlLeft') || input.down('ControlRight')) wish.addScaledVector(this.up, -1);
       if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(speed);
       this.vel.lerp(wish, 1 - Math.exp(-dt * 6));
       this.integrate(dt);
@@ -131,6 +135,7 @@ export class Player {
           this.fuel = Math.max(0, this.fuel - dt / 2.2);
         }
       }
+      this.jetting = !this.grounded && !liquid && input.down('Space') && this.fuel > 0 && this.groundTime === 0;
       if (this.grounded) this.fuel = Math.min(1, this.fuel + dt / 1.6);
       this.vel.copy(tangential).addScaledVector(this.up, up);
       // Terminal velocity scales with gravity so low-g falls feel floaty
@@ -160,6 +165,7 @@ export class Player {
   }
 
   private checkLiquid(): boolean {
+    if (this.liquidTest) return this.liquidTest(_c.copy(this.pos).addScaledVector(this.up, 0.3));
     const P = this.world.params;
     const y = this.pos.y + 0.3;
     if (y < P.seaLevel) {

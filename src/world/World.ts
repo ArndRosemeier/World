@@ -116,6 +116,7 @@ export class World {
   skyVisibility(x: number, y: number, z: number): number {
     const col = this.terrain.columnAt(x, z);
     if (y > col.top) return 1;
+    if (Terrain.sealedFromSky(col, y)) return 0;
     let sky = 1;
     for (const st of [3, 7, 14, 26, 45, 80]) {
       const yy = y + st;

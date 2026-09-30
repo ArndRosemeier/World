@@ -55,7 +55,7 @@ export class Hud {
           <div>
             <p><b>WASD</b> move · <b>Shift</b> sprint</p>
             <p><b>Space</b> jump · hold in air for jetpack</p>
-            <p><b>V</b> toggle flight · <b>Space/C</b> up/down</p>
+            <p><b>V</b> toggle flight · <b>Space/Ctrl</b> up/down</p>
             <p><b>1–4 / Q E</b> choose tool</p>
             <p><b>LMB / RMB</b> use tool · <b>wheel</b> size</p>
             <p><b>F</b> throw a charge anywhere</p>
@@ -64,7 +64,8 @@ export class Hud {
             <p><b>M</b> map (double-click to travel)</p>
             <p><b>L</b> lamp · <b>T</b> hold to speed up time</p>
             <p><b>G</b> graphics quality · <b>F3</b> stats</p>
-            <p><b>H</b> this manual · <b>Esc</b> release mouse</p>
+            <p><b>C</b> first / third person view</p>
+            <p><b>H</b> this manual · <b>Esc</b> menu</p>
           </div>
         </div>
         <p class="tip">Gravity is not constant here. Pale shimmering regions are levitation fields — jump. Moonlets have their own pull; walk around them. Lift wells carry you skyward. Sinkholes lead down to the underworld, where the ${'<i>deep dwellers</i>'} live.</p>
