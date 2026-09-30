@@ -5,6 +5,7 @@ export class Audio {
   private noise!: AudioBuffer;
   private wind: { gain: GainNode; filter: BiquadFilterNode } | null = null;
   private hum: { gain: GainNode; osc: OscillatorNode } | null = null;
+  private roar: { gain: GainNode; filter: BiquadFilterNode } | null = null;
   volume = 0.6;
 
   /** Must be called from a user gesture. */
@@ -44,6 +45,27 @@ export class Audio {
     osc.connect(hg).connect(this.master);
     osc.start();
     this.hum = { gain: hg, osc };
+    // Waterfall roar: pink-ish noise through a resonant low band
+    const rs = ctx.createBufferSource();
+    rs.buffer = this.noise;
+    rs.loop = true;
+    rs.playbackRate.value = 0.7;
+    const rf = ctx.createBiquadFilter();
+    rf.type = 'lowpass';
+    rf.frequency.value = 700;
+    rf.Q.value = 0.4;
+    const rg = ctx.createGain();
+    rg.gain.value = 0;
+    rs.connect(rf).connect(rg).connect(this.master);
+    rs.start();
+    this.roar = { gain: rg, filter: rf };
+  }
+
+  setRoar(level: number): void {
+    if (!this.ctx || !this.roar) return;
+    const t = this.ctx.currentTime;
+    this.roar.gain.gain.setTargetAtTime(Math.min(0.5, level * 0.5), t, 0.4);
+    this.roar.filter.frequency.setTargetAtTime(400 + level * 900, t, 0.4);
   }
 
   setAmbience(windStrength: number, underground: number, altitude: number): void {

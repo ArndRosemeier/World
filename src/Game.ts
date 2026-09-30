@@ -19,6 +19,9 @@ import { Tools } from './player/Tools';
 import { Audio } from './player/Audio';
 import { Hud } from './ui/Hud';
 import { Liquids } from './render/Liquids';
+import { Fluids } from './water/Fluids';
+import { Waterfalls } from './water/Waterfalls';
+import { waterLight } from './water/WaterShaders';
 import { Avatar } from './player/Avatar';
 import { RGB } from './core/math';
 import { MapView } from './ui/MapView';
@@ -82,6 +85,8 @@ export class Game {
   private fps = 60;
   private menu: HTMLDivElement;
   readonly liquids: Liquids;
+  fluids!: Fluids;
+  readonly waterfalls: Waterfalls;
   readonly avatar: Avatar;
   thirdPerson = false;
   private camDist = 4.5;
@@ -148,7 +153,7 @@ export class Game {
     this.dynamicBatch = new PrimitiveBatch(true);
     this.scene.add(this.staticBatch.group, this.dynamicBatch.group);
     this.debris = new Debris(this.world, this.dynamicBatch);
-    this.dust = new Particles(2500, false);
+    this.dust = new Particles(5000, false);
     this.glow = new Particles(4000, true);
     this.scene.add(this.dust.points, this.glow.points);
 
@@ -157,7 +162,7 @@ export class Game {
 
     this.player = new Player(this.world);
     this.player.sources.push(this.props, this.settlements);
-    this.player.liquidTest = (p) => this.liquids.submerged(p);
+    this.player.liquidTest = (p) => this.liquids.submerged(p) || !!this.fluids?.submerged(p);
     this.avatar = new Avatar(P.seed, P.biomes[0].top);
     this.input = new Input(this.renderer.domElement);
     this.tools = new Tools(this.world, this.chunks, this.props, this.settlements, this.creatures, this.debris, this.dust, this.glow, this.audio);
@@ -183,6 +188,12 @@ export class Game {
     addEventListener('resize', () => this.resize());
     addEventListener('beforeunload', () => this.save(true));
     this.load();
+    // Dynamic water starts after loading so saved excavations flood again
+    this.fluids = new Fluids(seed, this.world.edits.serialize(), P, this.dust);
+    this.scene.add(this.fluids.group);
+    this.world.edits.onAdd = (e) => this.fluids.edit(e.x, e.y, e.z, e.r, e.op);
+    this.waterfalls = new Waterfalls(this.world, this.dust);
+    this.scene.add(this.waterfalls.group);
     (window as unknown as { game: Game }).game = this;
   }
 
@@ -415,7 +426,20 @@ export class Game {
       fogDensity: fog.density,
       light: 0.5 + 0.5 * st.day,
     }, under);
-    const target = this.liquids.submerged(this.camera.position) ? 1 : 0;
+    // Flowing water and waterfalls share one lighting state
+    waterLight.uTime.value = t;
+    waterLight.uSunDir.value.copy(st.sunDir);
+    waterLight.uSunColor.value.copy(st.sunLight);
+    waterLight.uSkyTop.value.copy(skyTop);
+    waterLight.uHorizon.value.copy(horizon);
+    waterLight.uAmbient.value.copy(st.skyAmbient).multiplyScalar(0.55).add(new THREE.Color(shared.uUnderAmbient.value).multiplyScalar(under * 1.5));
+    waterLight.uFogColor.value.copy(fog.color);
+    waterLight.uFogDensity.value = fog.density;
+    this.fluids.update(dt, this.player.pos, this.env.sky);
+    this.waterfalls.light = Math.max(0.12, Math.min(1, (0.25 + 0.75 * st.day) * (0.2 + 0.8 * this.env.sky)));
+    this.waterfalls.update(dt, this.player.pos, this.env.sky);
+    this.audio.setRoar(this.waterfalls.roar);
+    const target = this.liquids.submerged(this.camera.position) || this.fluids.submerged(this.camera.position) ? 1 : 0;
     this.submerged = lerp(this.submerged, target, 1 - Math.exp(-dt * 10));
   }
 
@@ -641,7 +665,7 @@ export class Game {
       fly: this.player.mode === 'fly',
       heading: this.heading(),
       markers: this.markers,
-      stats: this.frame % 10 === 0 ? `${this.fps.toFixed(0)} fps  ${this.quality}\nchunks ${this.chunks.stats.visible}/${this.chunks.stats.nodes}  jobs ${this.chunks.stats.pending}\ntris ${(this.chunks.stats.triangles / 1e6).toFixed(2)}M  calls ${r.calls}\nflora ${this.props.instanceCount}  life ${this.creatures.creatures.length}  debris ${this.debris.count}\nedits ${this.world.edits.edits.length}` : undefined,
+      stats: this.frame % 10 === 0 ? `${this.fps.toFixed(0)} fps  ${this.quality}\nchunks ${this.chunks.stats.visible}/${this.chunks.stats.nodes}  jobs ${this.chunks.stats.pending}\ntris ${(this.chunks.stats.triangles / 1e6).toFixed(2)}M  calls ${r.calls}\nflora ${this.props.instanceCount}  life ${this.creatures.creatures.length}  debris ${this.debris.count}\nedits ${this.world.edits.edits.length}  water ${this.fluids.stats.awake}/${this.fluids.stats.chunks}  falls ${this.waterfalls.count}` : undefined,
     }, dt);
   }
 

@@ -298,6 +298,33 @@ export class Terrain {
     return out;
   }
 
+  /** Floating islands whose cells lie within `radius` of (x, z). */
+  islandsInRange(x: number, z: number, radius: number): { x: number; y: number; z: number; r: number; t: number; cx: number; cz: number }[] {
+    const out: { x: number; y: number; z: number; r: number; t: number; cx: number; cz: number }[] = [];
+    const r = Math.ceil(radius / ISLAND_CELL);
+    const cx0 = Math.floor(x / ISLAND_CELL), cz0 = Math.floor(z / ISLAND_CELL);
+    for (let i = -r; i <= r; i++)
+      for (let j = -r; j <= r; j++) {
+        if (this.levitation((cx0 + i + 0.5) * ISLAND_CELL, (cz0 + j + 0.5) * ISLAND_CELL) < 0.01) continue;
+        const c = this.islandCell(cx0 + i, cz0 + j);
+        if (c && Math.hypot(c.x - x, c.z - z) < radius) out.push({ ...c, cx: cx0 + i, cz: cz0 + j });
+      }
+    return out;
+  }
+
+  /** Sinkhole shafts whose cells lie within `radius` of (x, z). */
+  shaftsInRange(x: number, z: number, radius: number): { x: number; z: number; r: number; cx: number; cz: number }[] {
+    const out: { x: number; z: number; r: number; cx: number; cz: number }[] = [];
+    const r = Math.ceil(radius / SHAFT_CELL);
+    const cx0 = Math.floor(x / SHAFT_CELL), cz0 = Math.floor(z / SHAFT_CELL);
+    for (let i = -r; i <= r; i++)
+      for (let j = -r; j <= r; j++) {
+        const c = this.shaftCell(cx0 + i, cz0 + j);
+        if (c && Math.hypot(c.x - x, c.z - z) < radius) out.push({ ...c, cx: cx0 + i, cz: cz0 + j });
+      }
+    return out;
+  }
+
   // --- Settlements -----------------------------------------------------------------------------
 
   siteCell(civIndex: number, cx: number, cz: number): SiteInfo | null {

@@ -21,6 +21,8 @@ URL parameters: `?seed=<text>` picks the world, `&pos=x,z` or `&pos=x,y,z` drops
 | **Flora** | Seeded species per biome, built with procedural generators for 17 plant kinds. Each species has variants, wind sway and bioluminescence. |
 | **Fauna** | Walkers, crawlers, hoppers, flocking flyers and drifting floaters. Their bodies are procedural, their legs use IK, and they graze, herd and flee. |
 | **Civilisations** | Two sapient species per world, one on the surface and one in the underworld. Each has an architectural family, a language and a glyph script. Settlements have villagers who run errands, gather at the fire at night, greet you in their script and panic at explosions. |
+| **Flowing water** | A mass-based cellular automaton on a 1 m grid runs in its own worker. Seas and underworld lakes are infinite sources, so anything you dig below their level floods, and water pours through openings into caves. It levels out, sleeps when settled and is meshed smoothly with flow-advected currents and foam. You can swim in it. |
+| **Waterfalls** | Procedural vistas: rivers that meander to cliff edges and plunge off, falls pouring from floating islands in slow low-gravity arcs, streams tumbling hundreds of metres down sinkholes into the underworld, and glowing falls from the cavern ceiling. Trajectories follow the real gravity field and terrain, with mist, plunge pools and a roaring sound. |
 | **Liquids** | Seas and underworld lakes are single camera-centred meshes driven by depth masks baked in the workers. They have Gerstner waves whose speed follows the world's gravity, shoreline foam and whitecaps, fresnel sky reflections, sun glints, depth colour and an underwater view. The underworld lakes glow with slow currents. |
 | **Traveller** | Your third-person body is procedural too: a strider, tripod or hovering form in colours complementary to the world's life, with IK legs, a thruster backpack, the multitool and sometimes a companion drone. |
 | **Destruction** | You can dig and build smooth terrain at every LOD. Charges blast craters, and buildings collapse when their supports go. Plants shatter, creatures become debris, and everything persists per seed in `localStorage`. |
@@ -48,6 +50,7 @@ src/
     ChunkManager  sparse octree LOD streaming; keeps old meshes until replacements are ready
     WorkerPool    prioritised job queue across N workers (also renders map tiles)
     World         main-thread facade: exact density, normals, raycasts, gravity field, snapping
+  water/        FluidSim + fluid.worker (flow simulation), Fluids (rendering), Waterfalls, WaterShaders
   flora/        FloraGen (geometry generators), PropManager (instancing, LOD tiers, colliders, destruction)
   fauna/        Creature (body plans, IK locomotion, AI states), CreatureManager (spawning, herds, flocks)
   civ/          Settlement (layout + buildings from primitives), SettlementManager (villagers, collisions), Glyphs

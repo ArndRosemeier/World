@@ -39,11 +39,14 @@ export class EditStore {
   private nextId = 1;
   /** Bumped on every change so that savers can tell when to persist. */
   revision = 0;
+  /** Called after every new edit (not for loaded ones). */
+  onAdd: ((e: Edit) => void) | null = null;
 
   add(x: number, y: number, z: number, r: number, op: number): Edit {
     const e: Edit = { id: this.nextId++, x, y, z, r, op };
     this.insert(e);
     this.revision++;
+    this.onAdd?.(e);
     return e;
   }
 
