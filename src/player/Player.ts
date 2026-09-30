@@ -70,7 +70,9 @@ export class Player {
     if (gl > 0.3 && this.mode === 'walk') {
       _g.copy(this.gravity).multiplyScalar(-1 / gl);
       const ang = this.up.angleTo(_g);
-      if (ang > 1e-4) {
+      // Follow gradual changes (walking around a moonlet) but not sudden reversals
+      // (lift wells): there you stay upright and simply fall upward.
+      if (ang > 1e-4 && ang < 1.75) {
         const k = Math.min(1, (dt * 2.6) / Math.max(ang, 0.3));
         _q.setFromUnitVectors(this.up, _g);
         _q.slerp(IDENT, 1 - k);
@@ -100,6 +102,8 @@ export class Player {
       const wish = new THREE.Vector3().addScaledVector(this.forward, f).addScaledVector(right, s);
       if (wish.lengthSq() > 0) wish.normalize();
       const speed = sprint ? 10.5 : 5.2;
+      // Apply the true gravity vector (it can point sideways or even up in a lift well)
+      this.vel.addScaledVector(this.gravity, dt);
       const vUp = this.vel.dot(this.up);
       const tangential = this.vel.clone().addScaledVector(this.up, -vUp);
       const liquid = this.checkLiquid();
@@ -113,7 +117,6 @@ export class Player {
         if (tl > Math.max(speed, 12)) tangential.multiplyScalar(Math.max(speed, 12) / tl);
       }
       let up = vUp;
-      up += -gl * dt;
       if (liquid) {
         up *= Math.exp(-dt * 2.5);
         up += gl * 0.85 * dt;
@@ -131,6 +134,11 @@ export class Player {
       if (this.grounded) this.fuel = Math.min(1, this.fuel + dt / 1.6);
       this.vel.copy(tangential).addScaledVector(this.up, up);
       // Terminal velocity scales with gravity so low-g falls feel floaty
+      // Lift wells carry you at a stately pace rather than launching you into orbit
+      if (this.gravity.dot(this.up) > 0) {
+        const vu = this.vel.dot(this.up);
+        if (vu > 16) this.vel.addScaledVector(this.up, (16 - vu) * Math.min(1, dt * 3));
+      }
       const tv = 55;
       if (this.vel.length() > tv) this.vel.multiplyScalar(tv / this.vel.length());
       this.integrate(dt);

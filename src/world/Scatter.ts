@@ -141,6 +141,7 @@ export function scatterProps(B: ChunkBuilder, job: ChunkJob, s: number): Float32
           if (nEdits && nearEdit(x, y, z)) continue;
           if (hab === 'surface' && exactCol.settle > 0.25 && f.collider > 0) continue;
           if (hab === 'surface' && exactCol.settle > 0.6) continue;
+          if (hab === 'under' && exactCol.uSettle > 0.2 && (f.collider > 0 || exactCol.uSettle > 0.6)) continue;
 
           let ux = nx * f.alignNormal, uy = upY * (1 - f.alignNormal) + ny * f.alignNormal, uz = nz * f.alignNormal;
           const ul = Math.hypot(ux, uy, uz) || 1;

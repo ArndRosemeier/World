@@ -87,7 +87,7 @@ export class ChunkManager {
     this.edits = edits;
     this.material = createTerrainMaterial();
     this.seaMaterial = createLiquidMaterial(new THREE.Color().setRGB(...params.liquid, THREE.SRGBColorSpace), params.liquidGlow);
-    this.glowMaterial = createLiquidMaterial(new THREE.Color().setRGB(...params.under.liquid, THREE.SRGBColorSpace), 1.2);
+    this.glowMaterial = createLiquidMaterial(new THREE.Color().setRGB(...params.under.liquid, THREE.SRGBColorSpace), 0.55);
     this.group.name = 'terrain';
   }
 
